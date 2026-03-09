@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Heartratemonitor</string>
+    <string name="attribution_hr_stream">Heart rate streaming</string>
+</resources>
