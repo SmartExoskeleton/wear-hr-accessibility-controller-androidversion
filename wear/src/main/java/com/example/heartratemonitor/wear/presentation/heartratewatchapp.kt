@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -300,9 +301,11 @@ fun WearApp(
                 ) {
                     Text(
                         text = "LIVE HEART RATE",
-                        fontSize = 11.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFB8C1CC)
+                        color = Color(0xFFB8C1CC),
+                        textAlign = TextAlign.Center
                     )
 
                     Box(

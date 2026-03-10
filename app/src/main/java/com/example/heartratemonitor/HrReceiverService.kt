@@ -9,6 +9,12 @@ class HrReceiverService : WearableListenerService() {
 
     private val tag = "HR_SVC"
 
+    override fun onCreate() {
+        super.onCreate()
+        HrStore.init(applicationContext)
+        HrAutomationController.init(applicationContext)
+    }
+
     override fun onMessageReceived(messageEvent: MessageEvent) {
         if (messageEvent.path != "/hr") {
             return

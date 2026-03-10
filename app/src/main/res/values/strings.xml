@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Heartratemonitor</string>
     <string name="attribution_hr_stream">Heart rate streaming</string>
+    <string name="accessibility_service_desc">Automates Eco/Fitness button taps for research control.</string>
 </resources>

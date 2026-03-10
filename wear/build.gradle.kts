@@ -12,6 +12,7 @@ android {
     }
 
     defaultConfig {
+        // Keep phone + wear app IDs aligned so Wear Data Layer messages route correctly.
         applicationId = "com.example.heartratemonitor"
         minSdk = 30
         targetSdk = 36
