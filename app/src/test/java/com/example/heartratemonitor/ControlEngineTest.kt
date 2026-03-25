@@ -18,6 +18,7 @@ class ControlEngineTest {
     fun noSwitchBeforeDwell() {
         val clock = FakeClock()
         val engine = ControlEngine(
+            initialMode = DeviceMode.FITNESS,
             config = ControlConfig(highThreshold = 100, lowThreshold = 80, dwellHighMs = 5000),
             nowMs = { clock.now }
         )
@@ -33,6 +34,7 @@ class ControlEngineTest {
     fun switchesAfterDwell() {
         val clock = FakeClock()
         val engine = ControlEngine(
+            initialMode = DeviceMode.FITNESS,
             config = ControlConfig(highThreshold = 100, lowThreshold = 80, dwellHighMs = 5000),
             nowMs = { clock.now }
         )
@@ -40,14 +42,14 @@ class ControlEngineTest {
         engine.onSample(105, autoEnabled = true)
         clock.tick(5000)
         val decision = engine.onSample(105, autoEnabled = true)
-        assertEquals(DeviceMode.FITNESS, decision.switchTarget)
+        assertEquals(DeviceMode.ECO, decision.switchTarget)
     }
 
     @Test
     fun cooldownBlocksImmediateReswitch() {
         val clock = FakeClock()
         val engine = ControlEngine(
-            initialMode = DeviceMode.ECO,
+            initialMode = DeviceMode.FITNESS,
             config = ControlConfig(
                 highThreshold = 100,
                 lowThreshold = 80,
@@ -60,9 +62,9 @@ class ControlEngineTest {
 
         engine.onSample(110, autoEnabled = true)
         clock.tick(1000)
-        val toFitness = engine.onSample(110, autoEnabled = true)
-        assertEquals(DeviceMode.FITNESS, toFitness.switchTarget)
-        engine.onSwitchSuccess(DeviceMode.FITNESS)
+        val toEco = engine.onSample(110, autoEnabled = true)
+        assertEquals(DeviceMode.ECO, toEco.switchTarget)
+        engine.onSwitchSuccess(DeviceMode.ECO)
 
         engine.onSample(70, autoEnabled = true)
         clock.tick(1000)
@@ -82,14 +84,14 @@ class ControlEngineTest {
         val manual = engine.onManualOverride(DeviceMode.FITNESS)
         assertEquals("manual_override", manual.reason)
 
-        val held = engine.onSample(70, autoEnabled = true)
+        val held = engine.onSample(110, autoEnabled = true)
         assertEquals("manual_hold", held.reason)
         assertNull(held.switchTarget)
 
         clock.tick(10001)
-        engine.onSample(70, autoEnabled = true)
-        clock.tick(7000)
-        val request = engine.onSample(70, autoEnabled = true)
+        engine.onSample(110, autoEnabled = true)
+        clock.tick(5000)
+        val request = engine.onSample(110, autoEnabled = true)
         assertNotNull(request.switchTarget)
     }
 }

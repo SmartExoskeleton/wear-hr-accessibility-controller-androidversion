@@ -26,7 +26,7 @@ class ControlEngine(
     private var currentMode = initialMode
     private var candidateMode: DeviceMode? = null
     private var candidateSinceMs: Long = 0L
-    private var lastSwitchAtMs: Long = 0L
+    private var lastSwitchAtMs: Long? = null
     private var manualHoldUntilMs: Long = 0L
 
     fun updateConfig(newConfig: ControlConfig) {
@@ -88,7 +88,7 @@ class ControlEngine(
             )
         }
 
-        val dwellTarget = if (desiredMode == DeviceMode.FITNESS) config.dwellHighMs else config.dwellLowMs
+        val dwellTarget = if (bpm >= config.highThreshold) config.dwellHighMs else config.dwellLowMs
         val dwellElapsed = now - candidateSinceMs
         if (dwellElapsed < dwellTarget) {
             return EngineDecision(
@@ -97,12 +97,15 @@ class ControlEngine(
             )
         }
 
-        val cooldownElapsed = now - lastSwitchAtMs
-        if (cooldownElapsed < config.cooldownMs) {
-            return EngineDecision(
-                "Cooldown active: ${cooldownElapsed}ms/${config.cooldownMs}ms",
-                reason = "cooldown"
-            )
+        val lastSwitchAt = lastSwitchAtMs
+        if (lastSwitchAt != null) {
+            val cooldownElapsed = now - lastSwitchAt
+            if (cooldownElapsed < config.cooldownMs) {
+                return EngineDecision(
+                    "Cooldown active: ${cooldownElapsed}ms/${config.cooldownMs}ms",
+                    reason = "cooldown"
+                )
+            }
         }
 
         return EngineDecision(
@@ -115,10 +118,10 @@ class ControlEngine(
     private fun desiredModeForHr(bpm: Int): DeviceMode {
         return when (currentMode) {
             DeviceMode.ECO -> {
-                if (bpm >= config.highThreshold) DeviceMode.FITNESS else DeviceMode.ECO
+                if (bpm <= config.lowThreshold) DeviceMode.FITNESS else DeviceMode.ECO
             }
             DeviceMode.FITNESS -> {
-                if (bpm <= config.lowThreshold) DeviceMode.ECO else DeviceMode.FITNESS
+                if (bpm >= config.highThreshold) DeviceMode.ECO else DeviceMode.FITNESS
             }
         }
     }
