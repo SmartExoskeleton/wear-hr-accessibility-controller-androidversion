@@ -6,6 +6,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +17,7 @@ import kotlinx.coroutines.launch
 object HrAutomationController {
     private const val PREF_FILE = "hr_control"
     private const val KEY_AUTO_ENABLED = "auto_enabled"
+    private const val KEY_AUDIO_ENABLED = "audio_enabled"
     private const val KEY_HIGH_THRESHOLD = "high_threshold"
     private const val KEY_LOW_THRESHOLD = "low_threshold"
     private const val KEY_DWELL_HIGH_MS = "dwell_high_ms"
@@ -24,6 +27,7 @@ object HrAutomationController {
     private const val KEY_CONFIG_VERSION = "config_version"
     private const val SWITCH_TEST_INTERVAL_MS = 7000L
     private const val DEFAULT_AUTO_ENABLED = true
+    private const val DEFAULT_AUDIO_ENABLED = true
     private const val DEFAULT_HIGH_THRESHOLD = 100
     private const val DEFAULT_LOW_THRESHOLD = 88
     private const val DEFAULT_DWELL_HIGH_MS = 2000L
@@ -37,12 +41,16 @@ object HrAutomationController {
     private var pendingManualMode: DeviceMode? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var switchTestJob: Job? = null
+    private var audioGateJob: Job? = null
 
     private val _currentMode = MutableStateFlow(DeviceMode.ECO)
     val currentMode: StateFlow<DeviceMode> = _currentMode
 
     private val _autoEnabled = MutableStateFlow(false)
     val autoEnabled: StateFlow<Boolean> = _autoEnabled
+
+    private val _audioEnabled = MutableStateFlow(false)
+    val audioEnabled: StateFlow<Boolean> = _audioEnabled
 
     private val _config = MutableStateFlow(ControlConfig())
     val config: StateFlow<ControlConfig> = _config
@@ -60,6 +68,7 @@ object HrAutomationController {
         maybeMigrateDefaults(prefs)
 
         _autoEnabled.value = prefs.getBoolean(KEY_AUTO_ENABLED, DEFAULT_AUTO_ENABLED)
+        _audioEnabled.value = prefs.getBoolean(KEY_AUDIO_ENABLED, DEFAULT_AUDIO_ENABLED)
         _config.value = ControlConfig(
             highThreshold = prefs.getInt(KEY_HIGH_THRESHOLD, DEFAULT_HIGH_THRESHOLD),
             lowThreshold = prefs.getInt(KEY_LOW_THRESHOLD, DEFAULT_LOW_THRESHOLD),
@@ -71,6 +80,8 @@ object HrAutomationController {
 
         engine = ControlEngine(initialMode = _currentMode.value, config = _config.value)
         ResearchLogger.init(context.applicationContext)
+        RandomAudioController.init(context.applicationContext)
+        startAudioGateMonitor()
         ResearchLogger.logEvent(
             event = "controller_init",
             details = "auto=${_autoEnabled.value}",
@@ -92,6 +103,21 @@ object HrAutomationController {
         _lastDecision.value = if (enabled) "Auto mode enabled" else "Auto mode paused"
         ResearchLogger.logEvent(
             event = "auto_toggle",
+            details = "enabled=$enabled",
+            fromMode = _currentMode.value,
+            toMode = _currentMode.value
+        )
+    }
+
+    fun setAudioEnabled(enabled: Boolean) {
+        val context = appContext ?: return
+        _audioEnabled.value = enabled
+        context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_AUDIO_ENABLED, enabled)
+            .apply()
+        ResearchLogger.logEvent(
+            event = "audio_toggle",
             details = "enabled=$enabled",
             fromMode = _currentMode.value,
             toMode = _currentMode.value
@@ -376,5 +402,31 @@ object HrAutomationController {
             .putLong(KEY_MANUAL_HOLD_MS, DEFAULT_MANUAL_HOLD_MS)
             .putInt(KEY_CONFIG_VERSION, CONFIG_VERSION)
             .apply()
+    }
+
+    private fun startAudioGateMonitor() {
+        if (audioGateJob != null) return
+        audioGateJob = scope.launch {
+            combine(
+                _autoEnabled,
+                _audioEnabled,
+                _switchTestEnabled,
+                ModeAccessibilityService.serviceBound,
+                ModeAccessibilityService.foregroundPackage,
+            ) { autoEnabled, audioEnabled, switchTestEnabled, serviceBound, foregroundPackage ->
+                autoEnabled &&
+                    audioEnabled &&
+                    !switchTestEnabled &&
+                    serviceBound &&
+                    ModeAccessibilityService.matchesExpectedPackage(
+                        foregroundPackage,
+                        ModeAccessibilityService.defaultTargetPackage
+                    )
+            }
+                .distinctUntilChanged()
+                .collect { isActive ->
+                    RandomAudioController.setAutomationActive(isActive)
+                }
+        }
     }
 }

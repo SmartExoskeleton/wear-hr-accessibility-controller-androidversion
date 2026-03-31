@@ -11,22 +11,30 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.lang.ref.WeakReference
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 class ModeAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        HrAutomationController.init(applicationContext)
         serviceRef = WeakReference(this)
+        _serviceBound.value = true
+        _foregroundPackage.value = rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
         Log.i(tag, "Accessibility service connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        updateForegroundPackage(event)
         logForegroundFromEvent(event)
     }
 
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        _serviceBound.value = false
+        _foregroundPackage.value = null
         serviceRef = null
         super.onDestroy()
     }
@@ -39,6 +47,10 @@ class ModeAccessibilityService : AccessibilityService() {
         private var lastForegroundPackageLogged: String? = null
         private var lastForegroundLogAtMs: Long = 0L
         private const val foregroundLogThrottleMs = 1500L
+        private val _serviceBound = MutableStateFlow(false)
+        val serviceBound: StateFlow<Boolean> = _serviceBound
+        private val _foregroundPackage = MutableStateFlow<String?>(null)
+        val foregroundPackage: StateFlow<String?> = _foregroundPackage
 
         // Replace this with exact package in your closed test environment if needed.
         const val defaultTargetPackage = "com.hypershell"
@@ -77,6 +89,11 @@ class ModeAccessibilityService : AccessibilityService() {
             val service = serviceRef?.get() ?: return null
             val root = service.rootInActiveWindow ?: return null
             return root.packageName?.toString()
+        }
+
+        fun matchesExpectedPackage(actual: String?, expected: String): Boolean {
+            val packageName = actual?.takeIf { it.isNotBlank() } ?: return false
+            return matchesPackage(packageName, expected)
         }
 
         fun performModeSwitch(
@@ -290,11 +307,14 @@ class ModeAccessibilityService : AccessibilityService() {
             return actual == expected || actual.startsWith("$expected.") || actual.contains(expected)
         }
 
+        private fun updateForegroundPackage(event: AccessibilityEvent?) {
+            val service = serviceRef?.get() ?: return
+            resolveForegroundPackage(service, event)?.let { _foregroundPackage.value = it }
+        }
+
         private fun logForegroundFromEvent(event: AccessibilityEvent?) {
             val service = serviceRef?.get() ?: return
-            val eventPackage = event?.packageName?.toString()?.takeIf { it.isNotBlank() }
-            val rootPackage = service.rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
-            val packageName = eventPackage ?: rootPackage ?: return
+            val packageName = resolveForegroundPackage(service, event) ?: return
 
             val now = System.currentTimeMillis()
             val changed = packageName != lastForegroundPackageLogged
@@ -306,6 +326,26 @@ class ModeAccessibilityService : AccessibilityService() {
             val className = event?.className?.toString().orEmpty()
             val eventType = event?.eventType ?: -1
             Log.i(tag, "Foreground app pkg=$packageName class=$className eventType=$eventType")
+        }
+
+        private fun resolveForegroundPackage(
+            service: ModeAccessibilityService,
+            event: AccessibilityEvent?,
+        ): String? {
+            val rootPackage = service.rootInActiveWindow
+                ?.packageName
+                ?.toString()
+                ?.takeIf { it.isNotBlank() }
+            if (rootPackage != null) {
+                return rootPackage
+            }
+
+            val eventPackage = event?.packageName?.toString()?.takeIf { it.isNotBlank() }
+            return when (event?.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED -> eventPackage
+                else -> _foregroundPackage.value ?: eventPackage
+            }
         }
     }
 }

@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 val hr by HrStore.hr.collectAsState()
                 val mode by HrAutomationController.currentMode.collectAsState()
                 val autoEnabled by HrAutomationController.autoEnabled.collectAsState()
+                val audioEnabled by HrAutomationController.audioEnabled.collectAsState()
                 val switchTestEnabled by HrAutomationController.switchTestEnabled.collectAsState()
                 val config by HrAutomationController.config.collectAsState()
                 val decision by HrAutomationController.lastDecision.collectAsState()
@@ -158,6 +159,23 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                                         Switch(
                                             checked = autoEnabled,
                                             onCheckedChange = { HrAutomationController.setAutoEnabled(it) }
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Random Audio",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Switch(
+                                            checked = audioEnabled,
+                                            onCheckedChange = { HrAutomationController.setAudioEnabled(it) }
                                         )
                                     }
 
