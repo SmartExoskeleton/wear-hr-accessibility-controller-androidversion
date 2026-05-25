@@ -26,6 +26,8 @@ object HrAutomationController {
     private const val KEY_MANUAL_HOLD_MS = "manual_hold_ms"
     private const val KEY_CONFIG_VERSION = "config_version"
     private const val SWITCH_TEST_INTERVAL_MS = 7000L
+    private const val RESISTANCE_TEST_INTERVAL_MS = 2000L
+    private const val RESISTANCE_TEST_START_DELAY_MS = 5000L
     private const val DEFAULT_AUTO_ENABLED = true
     private const val DEFAULT_AUDIO_ENABLED = true
     private const val DEFAULT_HIGH_THRESHOLD = 100
@@ -41,6 +43,7 @@ object HrAutomationController {
     private var pendingManualMode: DeviceMode? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var switchTestJob: Job? = null
+    private var resistanceTestJob: Job? = null
     private var audioGateJob: Job? = null
 
     private val _currentMode = MutableStateFlow(DeviceMode.ECO)
@@ -60,6 +63,9 @@ object HrAutomationController {
 
     private val _switchTestEnabled = MutableStateFlow(false)
     val switchTestEnabled: StateFlow<Boolean> = _switchTestEnabled
+
+    private val _resistanceTestEnabled = MutableStateFlow(false)
+    val resistanceTestEnabled: StateFlow<Boolean> = _resistanceTestEnabled
 
     fun init(context: Context) {
         if (appContext != null) return
@@ -94,6 +100,7 @@ object HrAutomationController {
         val context = appContext ?: return
         if (enabled) {
             stopSwitchTest(updateMessage = false)
+            stopResistanceTest(updateMessage = false)
         }
         _autoEnabled.value = enabled
         context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
@@ -151,6 +158,7 @@ object HrAutomationController {
 
     fun emergencyStop() {
         stopSwitchTest(updateMessage = false)
+        stopResistanceTest(updateMessage = false)
         setAutoEnabled(false)
         pendingManualMode = null
         _lastDecision.value = "Emergency stop activated"
@@ -165,6 +173,7 @@ object HrAutomationController {
     fun startSwitchTest() {
         val context = appContext ?: return
         stopSwitchTest(updateMessage = false)
+        stopResistanceTest(updateMessage = false)
         setAutoEnabled(false)
         _switchTestEnabled.value = true
         _lastDecision.value = "7s switch test running. Open target app."
@@ -206,6 +215,85 @@ object HrAutomationController {
         }
         ResearchLogger.logEvent(
             event = "switch_test_stop",
+            bpm = HrStore.hr.value.toIntOrNull(),
+            fromMode = _currentMode.value,
+            toMode = _currentMode.value,
+            details = "stopped"
+        )
+    }
+
+    fun startResistanceTest() {
+        val context = appContext ?: return
+        stopSwitchTest(updateMessage = false)
+        stopResistanceTest(updateMessage = false)
+        setAutoEnabled(false)
+        _resistanceTestEnabled.value = true
+        _lastDecision.value = "Resistance test armed. Open target app."
+        ResearchLogger.logEvent(
+            event = "resistance_test_start",
+            bpm = HrStore.hr.value.toIntOrNull(),
+            fromMode = _currentMode.value,
+            toMode = _currentMode.value,
+            details = "interval_ms=$RESISTANCE_TEST_INTERVAL_MS"
+        )
+
+        resistanceTestJob = scope.launch {
+            delay(RESISTANCE_TEST_START_DELAY_MS)
+            var currentPercent = 45
+            var nextPercent = 25
+            while (isActive && _resistanceTestEnabled.value) {
+                if (!ModeAccessibilityService.isTargetAppForeground(
+                        context,
+                        ModeAccessibilityService.defaultTargetPackage
+                    )
+                ) {
+                    val currentPackage = ModeAccessibilityService.currentForegroundPackage()
+                    val packageHint = if (currentPackage.isNullOrBlank()) "unknown" else currentPackage
+                    _lastDecision.value =
+                        "Resistance pending: open ${ModeAccessibilityService.defaultTargetPackage} (now: $packageHint)"
+                    delay(RESISTANCE_TEST_INTERVAL_MS)
+                    continue
+                }
+
+                val start = System.currentTimeMillis()
+                val result = ModeAccessibilityService.performResistanceDrag(
+                    context = context,
+                    targetPercent = nextPercent,
+                    expectedPackage = ModeAccessibilityService.defaultTargetPackage,
+                    fromPercent = currentPercent
+                )
+                val latency = System.currentTimeMillis() - start
+                if (result.success) {
+                    currentPercent = nextPercent
+                    nextPercent = if (nextPercent == 25) 50 else 25
+                }
+                _lastDecision.value = result.message
+                ResearchLogger.logEvent(
+                    event = "resistance_drag_test",
+                    bpm = HrStore.hr.value.toIntOrNull(),
+                    fromMode = _currentMode.value,
+                    toMode = _currentMode.value,
+                    success = result.success,
+                    latencyMs = latency,
+                    details = result.message
+                )
+                delay(RESISTANCE_TEST_INTERVAL_MS)
+            }
+        }
+    }
+
+    fun stopResistanceTest(updateMessage: Boolean = true) {
+        if (!_resistanceTestEnabled.value && resistanceTestJob == null) {
+            return
+        }
+        resistanceTestJob?.cancel()
+        resistanceTestJob = null
+        _resistanceTestEnabled.value = false
+        if (updateMessage) {
+            _lastDecision.value = "2s resistance test stopped"
+        }
+        ResearchLogger.logEvent(
+            event = "resistance_test_stop",
             bpm = HrStore.hr.value.toIntOrNull(),
             fromMode = _currentMode.value,
             toMode = _currentMode.value,
@@ -293,7 +381,7 @@ object HrAutomationController {
     fun onHeartRateSample(bpm: Int) {
         if (bpm <= 0) return
         val context = appContext ?: return
-        if (_switchTestEnabled.value) {
+        if (_switchTestEnabled.value || _resistanceTestEnabled.value) {
             return
         }
         if (pendingManualMode != null) {
@@ -407,16 +495,22 @@ object HrAutomationController {
     private fun startAudioGateMonitor() {
         if (audioGateJob != null) return
         audioGateJob = scope.launch {
+            val testActive = combine(
+                _switchTestEnabled,
+                _resistanceTestEnabled,
+            ) { switchTestEnabled, resistanceTestEnabled ->
+                switchTestEnabled || resistanceTestEnabled
+            }
             combine(
                 _autoEnabled,
                 _audioEnabled,
-                _switchTestEnabled,
+                testActive,
                 ModeAccessibilityService.serviceBound,
                 ModeAccessibilityService.foregroundPackage,
-            ) { autoEnabled, audioEnabled, switchTestEnabled, serviceBound, foregroundPackage ->
+            ) { autoEnabled, audioEnabled, testActive, serviceBound, foregroundPackage ->
                 autoEnabled &&
                     audioEnabled &&
-                    !switchTestEnabled &&
+                    !testActive &&
                     serviceBound &&
                     ModeAccessibilityService.matchesExpectedPackage(
                         foregroundPackage,

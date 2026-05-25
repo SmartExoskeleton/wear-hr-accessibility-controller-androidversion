@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 val autoEnabled by HrAutomationController.autoEnabled.collectAsState()
                 val audioEnabled by HrAutomationController.audioEnabled.collectAsState()
                 val switchTestEnabled by HrAutomationController.switchTestEnabled.collectAsState()
+                val resistanceTestEnabled by HrAutomationController.resistanceTestEnabled.collectAsState()
                 val config by HrAutomationController.config.collectAsState()
                 val decision by HrAutomationController.lastDecision.collectAsState()
                 val accessibilityEnabled = ModeAccessibilityService.isEnabled(applicationContext)
@@ -71,6 +72,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 val streamStatus = if (hr == "—") "No live stream yet" else "Live watch telemetry"
                 val automationStatus = when {
                     switchTestEnabled -> "7s switch test running"
+                    resistanceTestEnabled -> "2s resistance test running"
                     !accessibilityEnabled -> "Accessibility not connected"
                     !autoEnabled -> "Automation paused"
                     else -> "Automation armed"
@@ -335,6 +337,21 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                                     onClick = { HrAutomationController.stopSwitchTest() },
                                     modifier = Modifier.weight(1f)
                                 ) { Text("Stop 7s Test") }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { HrAutomationController.startResistanceTest() },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("Start Resist") }
+
+                                Button(
+                                    onClick = { HrAutomationController.stopResistanceTest() },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("Stop Resist") }
                             }
 
                             Row(
